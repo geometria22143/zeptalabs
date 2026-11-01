@@ -1,0 +1,122 @@
+═══════════════════════════════════════════════════
+   🚀 GO LIVE CHECKLIST - ZeptaLabs News & Updates
+═══════════════════════════════════════════════════
+
+STEP 1: GET API KEY
+═══════════════════════════════════════════════════
+[ ] Go to: https://ai.google.dev/
+[ ] Click "Get API Key"
+[ ] Sign in with Google
+[ ] Create new API key
+[ ] Copy the API key (looks like: AIzaSy...)
+
+STEP 2: CONFIGURE LOCALLY
+═══════════════════════════════════════════════════
+[ ] Open file: .env.local
+[ ] Replace YOUR_API_KEY_HERE with your actual key
+[ ] Save the file
+
+STEP 3: TEST LOCALLY (OPTIONAL BUT RECOMMENDED)
+═══════════════════════════════════════════════════
+[ ] Open terminal/PowerShell
+[ ] Run: npm start
+[ ] Open browser: http://localhost:3000
+[ ] Check if website loads
+[ ] Test the features
+[ ] Close the server (Ctrl+C)
+
+STEP 4: CHOOSE HOSTING
+═══════════════════════════════════════════════════
+Pick ONE option:
+
+OPTION A: VERCEL (Easiest - Recommended)
+   [ ] Run: npm install -g vercel
+   [ ] Run: vercel login
+   [ ] Run: vercel
+   [ ] Go to Vercel dashboard
+   [ ] Add environment variable:
+       Name: GEMINI_API_KEY
+       Value: (your API key)
+   [ ] Run: vercel --prod
+   [ ] Copy your live URL!
+
+OPTION B: NETLIFY
+   [ ] Run: npm install -g netlify-cli
+   [ ] Run: netlify login
+   [ ] Run: netlify deploy --prod
+   [ ] Go to Netlify dashboard
+   [ ] Settings → Environment Variables
+   [ ] Add: GEMINI_API_KEY = (your key)
+   [ ] Copy your live URL!
+
+OPTION C: RAILWAY
+   [ ] Go to: https://railway.app
+   [ ] Sign up/Login
+   [ ] New Project → Deploy from GitHub
+   [ ] Connect your repo
+   [ ] Add environment variable:
+       GEMINI_API_KEY = (your key)
+   [ ] Copy your live URL!
+
+STEP 5: VERIFY DEPLOYMENT
+═══════════════════════════════════════════════════
+[ ] Visit your live URL
+[ ] Check homepage loads
+[ ] Test navigation
+[ ] Test news section
+[ ] Test updates section
+[ ] Test share functionality
+[ ] Check mobile view (resize browser)
+
+STEP 6: OPTIONAL ENHANCEMENTS
+═══════════════════════════════════════════════════
+[ ] Add custom domain
+[ ] Set up SSL certificate (usually automatic)
+[ ] Configure CDN (usually automatic)
+[ ] Add analytics (Google Analytics, etc.)
+[ ] Set up monitoring
+[ ] Share with friends! 🎉
+
+═══════════════════════════════════════════════════
+   📝 NOTES
+═══════════════════════════════════════════════════
+
+✅ npm is already installed: v12.2.1
+✅ Node.js is ready: v26.2.0
+✅ Dependencies are installed: 183 packages
+✅ Build tested successfully!
+
+Your files:
+- .env.local → Add API key here for local testing
+- .env.production → Template for production
+- QUICK_START.md → Simple guide
+- DEPLOYMENT.md → Detailed guide
+- SETUP_COMPLETE.md → Overview of what's done
+
+═══════════════════════════════════════════════════
+   🆘 TROUBLESHOOTING
+═══════════════════════════════════════════════════
+
+Problem: Build fails
+Solution: npm install --legacy-peer-deps
+
+Problem: Port 3000 in use
+Solution: Close other apps or change port in .env.local
+
+Problem: API key not working
+Solution: Check for spaces, verify key is active
+
+Problem: Module not found
+Solution: 
+   Remove-Item -Recurse -Force node_modules
+   Remove-Item package-lock.json
+   npm install --legacy-peer-deps
+
+═══════════════════════════════════════════════════
+
+Need detailed help? Read: DEPLOYMENT.md
+Quick guide? Read: QUICK_START.md
+
+You're ready to go live! 🚀✨
+
+═══════════════════════════════════════════════════

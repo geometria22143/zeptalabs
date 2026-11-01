@@ -1,0 +1,7 @@
+{
+  "name": "ZeptaLabs News & Updates",
+  "description": "Official news and updates platform for ZeptaLabs.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
