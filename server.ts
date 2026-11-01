@@ -220,6 +220,7 @@ app.post('/api/users/find', (req: Request, res: Response) => {
 // API Routes
 app.get('/api/posts', (_req: Request, res: Response) => {
   const posts = readPosts();
+  console.log(`[GET /api/posts] Fetched ${posts.length} posts from server storage`);
   res.json(posts);
 });
 
@@ -251,6 +252,7 @@ app.post('/api/posts', (req: Request, res: Response) => {
         shares: Math.max(existing.shares || 0, body.shares || 0),
       };
       writePosts(posts);
+      console.log(`[POST /api/posts] Updated existing post ${body.id} (${body.category}: ${body.title})`);
       res.status(200).json(posts[existingIndex]);
       return;
     }
@@ -284,6 +286,7 @@ app.post('/api/posts', (req: Request, res: Response) => {
 
   posts.unshift(newPost);
   writePosts(posts);
+  console.log(`[POST /api/posts] Created new post ${newPost.id} (${newPost.category}: ${newPost.title}). Total posts: ${posts.length}`);
   res.status(201).json(newPost);
 });
 
@@ -303,11 +306,15 @@ app.post('/api/posts/sync', (req: Request, res: Response) => {
     if (existingIndex === -1) {
       currentPosts.push(inc);
       changed = true;
+      console.log(`[POST /api/posts/sync] Synced post ${inc.id} (${inc.category}: ${inc.title})`);
     }
   }
 
   if (changed) {
     writePosts(currentPosts);
+    console.log(`[POST /api/posts/sync] Synced ${incomingPosts.length} posts from client. Total posts: ${currentPosts.length}`);
+  } else {
+    console.log(`[POST /api/posts/sync] No new posts to sync. Total posts: ${currentPosts.length}`);
   }
   res.json(currentPosts);
 });
