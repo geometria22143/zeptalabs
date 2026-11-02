@@ -1,1 +1,30 @@
-[]
+[
+  {
+    "id": "post_1793528272674",
+    "category": "Update",
+    "title": "test",
+    "description": "launch",
+    "authorName": "ZeptaLabs Officials",
+    "authorAvatar": "logo.png",
+    "createdAt": "Nov 1, 2026 03:17 PM",
+    "likes": 0,
+    "likedBy": [],
+    "shares": 0,
+    "comments": []
+  },
+  {
+    "id": "post_1793528220888",
+    "category": "News",
+    "title": "w",
+    "description": "w",
+    "authorName": "ZeptaLabs Officials",
+    "authorAvatar": "logo.png",
+    "createdAt": "Nov 1, 2026 03:17 PM",
+    "likes": 1,
+    "likedBy": [
+      "user_uu0jd9f"
+    ],
+    "shares": 0,
+    "comments": []
+  }
+]
