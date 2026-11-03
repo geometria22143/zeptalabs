@@ -42,16 +42,20 @@ const headers = {
 };
 
 export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
+  console.log('🔥 Netlify Function Called:', event.httpMethod, event.path);
+  
   // Handle CORS preflight
   if (event.httpMethod === 'OPTIONS') {
     return { statusCode: 204, headers, body: '' };
   }
 
   const path = event.path.replace('/.netlify/functions/posts', '');
+  console.log('📍 Processing path:', path);
 
   try {
     // GET /api/posts - Fetch all posts
     if (event.httpMethod === 'GET' && path === '') {
+      console.log('✅ GET /api/posts - Returning', posts.length, 'posts');
       return {
         statusCode: 200,
         headers,
@@ -62,6 +66,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // POST /api/posts - Create new post
     if (event.httpMethod === 'POST' && path === '') {
       const body = JSON.parse(event.body || '{}');
+      console.log('📝 POST /api/posts - Creating post:', body.title);
       
       if (!body.title || !body.category) {
         return {
@@ -124,6 +129,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
       };
 
       posts.unshift(newPost);
+      console.log('✅ Post created! Total posts:', posts.length);
       
       return {
         statusCode: 201,
