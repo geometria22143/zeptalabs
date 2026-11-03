@@ -3,6 +3,24 @@ import { PostItem, CommentItem } from '../types/post';
 const POSTS_KEY = 'zeptalabs_posts';
 const USER_SESSION_ID_KEY = 'zeptalabs_session_client_id';
 const LOGO_KEY = 'zeptalabs_site_logo';
+// Posts that were created while the server was unreachable and still need uploading
+const PENDING_POSTS_KEY = 'zeptalabs_pending_posts';
+
+function getPendingPosts(): PostItem[] {
+  try {
+    const raw = localStorage.getItem(PENDING_POSTS_KEY);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+function savePendingPosts(posts: PostItem[]): void {
+  try {
+    if (posts.length === 0) localStorage.removeItem(PENDING_POSTS_KEY);
+    else localStorage.setItem(PENDING_POSTS_KEY, JSON.stringify(posts));
+  } catch {}
+}
 
 export function getClientSessionId(): string {
   let id = localStorage.getItem(USER_SESSION_ID_KEY);
@@ -81,31 +99,23 @@ export async function updateSiteLogo(newLogoUrl: string): Promise<string> {
 // Fetch all posts from the server (shared across all viewers in real-time)
 export async function fetchAllPosts(): Promise<PostItem[]> {
   try {
-    const res = await fetch('/api/posts');
+    // Upload only posts that previously failed to reach the server. Never re-upload
+    // the general cache, otherwise posts deleted by the admin would reappear.
+    const pending = getPendingPosts();
+    if (pending.length > 0) {
+      try {
+        const syncRes = await fetch('/api/posts/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ posts: pending }),
+        });
+        if (syncRes.ok) savePendingPosts([]);
+      } catch {}
+    }
+
+    const res = await fetch('/api/posts', { cache: 'no-store' });
     if (res.ok) {
       const serverPosts: PostItem[] = await res.json();
-      const localCached = getLocalCachedPosts();
-
-      // Check if there are any locally created posts not yet on server
-      const serverIds = new Set(serverPosts.map((p) => p.id));
-      const unsyncedPosts = localCached.filter((p) => !serverIds.has(p.id));
-
-      if (unsyncedPosts.length > 0) {
-        try {
-          await fetch('/api/posts/sync', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ posts: unsyncedPosts }),
-          });
-          const refetchRes = await fetch('/api/posts');
-          if (refetchRes.ok) {
-            const mergedPosts: PostItem[] = await refetchRes.json();
-            saveLocalCachedPosts(mergedPosts);
-            return mergedPosts;
-          }
-        } catch {}
-      }
-
       saveLocalCachedPosts(serverPosts);
       return serverPosts;
     }
@@ -161,6 +171,7 @@ export async function createPost(
   const current = getLocalCachedPosts();
   current.unshift(created);
   saveLocalCachedPosts(current);
+  savePendingPosts([created, ...getPendingPosts()]);
   return created;
 }
 
@@ -178,6 +189,7 @@ export async function deletePost(postId: string): Promise<boolean> {
   } catch (err) {
     console.warn('Delete post failed on server:', err);
   }
+  savePendingPosts(getPendingPosts().filter((p) => p.id !== postId));
   const updated = getLocalCachedPosts().filter((p) => p.id !== postId);
   saveLocalCachedPosts(updated);
   return true;
