@@ -47,3 +47,6 @@ lerna-debug.log*
 
 # OS
 Thumbs.db
+
+# Local Netlify folder
+.netlify

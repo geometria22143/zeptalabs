@@ -1,112 +1,100 @@
-import type { Handler, HandlerEvent } from '@netlify/functions';
+import type { Config } from '@netlify/functions';
+import { eq } from 'drizzle-orm';
+import { db } from '../../db/index.js';
+import { users } from '../../db/schema.js';
 
-interface ServerUserItem {
-  name: string;
-  accountKey: string;
-  email?: string;
-  avatarUrl?: string;
-  createdAt: string;
-  notificationsEnabled?: boolean;
-}
-
-let users: ServerUserItem[] = [];
-
-const headers = {
+const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-  'Content-Type': 'application/json',
 };
 
-export const handler: Handler = async (event: HandlerEvent) => {
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers, body: '' };
+const json = (data: unknown, status = 200) =>
+  Response.json(data, { status, headers: { ...corsHeaders, 'Cache-Control': 'no-store' } });
+
+type UserRow = typeof users.$inferSelect;
+
+const toClient = (u: UserRow) => ({
+  name: u.name,
+  accountKey: u.displayKey,
+  email: u.email,
+  avatarUrl: u.avatarUrl,
+  createdAt: u.createdAt.toISOString(),
+  notificationsEnabled: u.notificationsEnabled !== 0,
+});
+
+// Normalise keys so "#abc", "abc" and "ABC" all resolve to the same account
+const normalizeKey = (key: string) => key.trim().toLowerCase().replace(/^#+/, '');
+
+const readBody = async (req: Request) => {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+};
+
+export default async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  const path = event.path.replace('/.netlify/functions/users', '');
+  const path = new URL(req.url).pathname.replace(/^\/api\/users/, '').replace(/\/$/, '');
 
   try {
-    // GET /api/users
-    if (event.httpMethod === 'GET' && path === '') {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(users),
-      };
+    if (req.method === 'GET' && path === '') {
+      const rows = await db.select().from(users);
+      return json(rows.map(toClient));
     }
 
-    // POST /api/users
-    if (event.httpMethod === 'POST' && path === '') {
-      const { name, accountKey, email, avatarUrl, notificationsEnabled } = JSON.parse(event.body || '{}');
-      
+    if (req.method === 'POST' && path === '') {
+      const { name, accountKey, email, avatarUrl, notificationsEnabled } = await readBody(req);
       if (!accountKey || typeof accountKey !== 'string') {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'accountKey is required' }),
-        };
+        return json({ error: 'accountKey is required' }, 400);
       }
 
-      const safeKey = accountKey.trim().toLowerCase();
-      users = users.filter((u) => (u.accountKey || '').trim().toLowerCase() !== safeKey);
-      
-      const updatedUser: ServerUserItem = {
+      const values = {
+        accountKey: normalizeKey(accountKey),
+        displayKey: accountKey.trim(),
         name: name || 'ZeptaLabs Member',
-        accountKey: accountKey.trim(),
         email: email || '',
         avatarUrl: avatarUrl || 'logo.png',
-        createdAt: new Date().toISOString(),
-        notificationsEnabled: notificationsEnabled !== false,
+        notificationsEnabled: notificationsEnabled === false ? 0 : 1,
       };
-      
-      users.push(updatedUser);
-      
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(updatedUser),
-      };
+
+      const [saved] = await db
+        .insert(users)
+        .values(values)
+        .onConflictDoUpdate({
+          target: users.accountKey,
+          set: {
+            displayKey: values.displayKey,
+            name: values.name,
+            email: values.email,
+            avatarUrl: values.avatarUrl,
+            notificationsEnabled: values.notificationsEnabled,
+          },
+        })
+        .returning();
+      return json(toClient(saved));
     }
 
-    // POST /api/users/find
-    if (event.httpMethod === 'POST' && path === '/find') {
-      const { key } = JSON.parse(event.body || '{}');
-      
+    if (req.method === 'POST' && path === '/find') {
+      const { key } = await readBody(req);
       if (!key || typeof key !== 'string') {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'key is required' }),
-        };
+        return json({ error: 'key is required' }, 400);
       }
-
-      const trimmed = key.trim().toLowerCase();
-      const normalized = trimmed.startsWith('#') ? trimmed : `#${trimmed}`;
-      const rawWithoutHash = trimmed.replace(/^#+/, '');
-
-      const found = users.find((u) => {
-        const uKey = (u.accountKey || '').trim().toLowerCase();
-        const uKeyWithoutHash = uKey.replace(/^#+/, '');
-        return uKey === trimmed || uKey === normalized || uKeyWithoutHash === rawWithoutHash;
-      });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ found: !!found, user: found || null }),
-      };
+      const [found] = await db.select().from(users).where(eq(users.accountKey, normalizeKey(key)));
+      return json({ found: !!found, user: found ? toClient(found) : null });
     }
 
-    return {
-      statusCode: 404,
-      headers,
-      body: JSON.stringify({ error: 'Not found' }),
-    };
+    return json({ error: 'Not found' }, 404);
   } catch (error) {
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: 'Internal server error' }),
-    };
+    console.error('users function error:', error);
+    return json({ error: 'Internal server error' }, 500);
   }
+};
+
+export const config: Config = {
+  path: ['/api/users', '/api/users/*'],
 };

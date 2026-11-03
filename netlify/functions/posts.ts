@@ -1,349 +1,252 @@
-import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
+import type { Config } from '@netlify/functions';
+import { desc, eq } from 'drizzle-orm';
+import { db } from '../../db/index.js';
+import { posts, type CommentRecord } from '../../db/schema.js';
 
-interface CommentItem {
-  id: string;
-  authorName: string;
-  authorAvatar?: string;
-  content: string;
-  createdAt: string;
-  likes: number;
-  likedBy: string[];
-}
-
-interface PostItem {
-  id: string;
-  category: 'News' | 'Update';
-  title: string;
-  description?: string;
-  attachment?: {
-    name: string;
-    type: string;
-    dataUrl: string;
-    sizeFormatted: string;
-  };
-  authorName: string;
-  authorAvatar: string;
-  createdAt: string;
-  likes: number;
-  likedBy: string[];
-  shares: number;
-  comments: CommentItem[];
-}
-
-// Use Netlify Blobs for persistent storage
-let posts: PostItem[] = [];
-
-// CORS headers for all responses
-const headers = {
+const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'Content-Type',
   'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
-  'Content-Type': 'application/json',
 };
 
-export const handler: Handler = async (event: HandlerEvent, context: HandlerContext) => {
-  // Handle CORS preflight
-  if (event.httpMethod === 'OPTIONS') {
-    return { statusCode: 204, headers, body: '' };
+const json = (data: unknown, status = 200) =>
+  Response.json(data, {
+    status,
+    headers: { ...corsHeaders, 'Cache-Control': 'no-store' },
+  });
+
+type PostRow = typeof posts.$inferSelect;
+
+// Shape the DB row exactly as the frontend PostItem expects
+const toClient = (row: PostRow) => ({
+  id: row.id,
+  category: row.category,
+  title: row.title,
+  description: row.description ?? undefined,
+  attachment: row.attachment ?? undefined,
+  authorName: row.authorName,
+  authorAvatar: row.authorAvatar,
+  createdAt: row.createdAt,
+  likes: row.likes,
+  likedBy: row.likedBy ?? [],
+  shares: row.shares,
+  comments: row.comments ?? [],
+});
+
+const displayDate = () => {
+  const now = new Date();
+  return (
+    now.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) +
+    ' ' +
+    now.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })
+  );
+};
+
+const listPosts = async () => {
+  const rows = await db.select().from(posts).orderBy(desc(posts.insertedAt));
+  return rows.map(toClient);
+};
+
+const getPost = async (id: string) => {
+  const [row] = await db.select().from(posts).where(eq(posts.id, id));
+  return row;
+};
+
+const readBody = async (req: Request) => {
+  try {
+    return await req.json();
+  } catch {
+    return {};
+  }
+};
+
+const buildNewRow = (body: any): typeof posts.$inferInsert => ({
+  id: body.id || 'post_' + Date.now().toString() + Math.random().toString(36).slice(2, 6),
+  category: body.category,
+  title: body.title,
+  description: body.description || null,
+  attachment: body.attachment || null,
+  authorName: body.authorName || 'ZeptaLabs Officials',
+  authorAvatar: body.authorAvatar || 'logo.png',
+  createdAt: body.createdAt || displayDate(),
+  likes: typeof body.likes === 'number' ? body.likes : 0,
+  likedBy: Array.isArray(body.likedBy) ? body.likedBy : [],
+  shares: typeof body.shares === 'number' ? body.shares : 0,
+  comments: Array.isArray(body.comments) ? body.comments : [],
+});
+
+export default async (req: Request) => {
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: corsHeaders });
   }
 
-  const path = event.path.replace('/.netlify/functions/posts', '');
+  const url = new URL(req.url);
+  const path = url.pathname.replace(/^\/api\/posts/, '').replace(/\/$/, '');
 
   try {
-    // GET /api/posts - Fetch all posts
-    if (event.httpMethod === 'GET' && path === '') {
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(posts),
-      };
+    // GET /api/posts
+    if (req.method === 'GET' && path === '') {
+      return json(await listPosts());
     }
 
-    // POST /api/posts - Create new post
-    if (event.httpMethod === 'POST' && path === '') {
-      const body = JSON.parse(event.body || '{}');
-      
+    // POST /api/posts - create (or merge if id already exists)
+    if (req.method === 'POST' && path === '') {
+      const body = await readBody(req);
       if (!body.title || !body.category) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'Title and category are required' }),
-        };
+        return json({ error: 'Title and category are required' }, 400);
       }
 
-      // Check if post already exists
       if (body.id) {
-        const existingIndex = posts.findIndex((p) => p.id === body.id);
-        if (existingIndex !== -1) {
-          const existing = posts[existingIndex];
-          const mergedComments = [...(existing.comments || [])];
-          for (const newComment of body.comments || []) {
-            if (!mergedComments.some((c) => c.id === newComment.id)) {
-              mergedComments.push(newComment);
-            }
+        const existing = await getPost(body.id);
+        if (existing) {
+          const mergedComments: CommentRecord[] = [...(existing.comments || [])];
+          for (const c of body.comments || []) {
+            if (!mergedComments.some((m) => m.id === c.id)) mergedComments.push(c);
           }
-          posts[existingIndex] = {
-            ...existing,
-            ...body,
-            comments: mergedComments,
-            likes: Math.max(existing.likes || 0, body.likes || 0),
-            shares: Math.max(existing.shares || 0, body.shares || 0),
-          };
-          return {
-            statusCode: 200,
-            headers,
-            body: JSON.stringify(posts[existingIndex]),
-          };
+          const [updated] = await db
+            .update(posts)
+            .set({
+              title: body.title,
+              category: body.category,
+              description: body.description ?? existing.description,
+              attachment: body.attachment ?? existing.attachment,
+              comments: mergedComments,
+              likes: Math.max(existing.likes || 0, body.likes || 0),
+              shares: Math.max(existing.shares || 0, body.shares || 0),
+            })
+            .where(eq(posts.id, body.id))
+            .returning();
+          return json(toClient(updated));
         }
       }
 
-      const newPost: PostItem = {
-        id: body.id || ('post_' + Date.now().toString()),
-        category: body.category,
-        title: body.title,
-        description: body.description || undefined,
-        attachment: body.attachment || undefined,
-        authorName: body.authorName || 'ZeptaLabs Officials',
-        authorAvatar: body.authorAvatar || 'logo.png',
-        createdAt:
-          body.createdAt ||
-          new Date().toLocaleDateString('en-US', {
-            month: 'short',
-            day: 'numeric',
-            year: 'numeric',
-          }) +
-            ' ' +
-            new Date().toLocaleTimeString('en-US', {
-              hour: '2-digit',
-              minute: '2-digit',
-            }),
-        likes: typeof body.likes === 'number' ? body.likes : 0,
-        likedBy: Array.isArray(body.likedBy) ? body.likedBy : [],
-        shares: typeof body.shares === 'number' ? body.shares : 0,
-        comments: Array.isArray(body.comments) ? body.comments : [],
-      };
-
-      posts.unshift(newPost);
-      
-      return {
-        statusCode: 201,
-        headers,
-        body: JSON.stringify(newPost),
-      };
+      const [created] = await db.insert(posts).values(buildNewRow(body)).returning();
+      return json(toClient(created), 201);
     }
 
-    // POST /api/posts/sync - Batch sync
-    if (event.httpMethod === 'POST' && path === '/sync') {
-      const body = JSON.parse(event.body || '{}');
-      const incomingPosts = body.posts || [];
-      
-      for (const inc of incomingPosts) {
-        if (!inc || !inc.id || !inc.title) continue;
-        const existingIndex = posts.findIndex((p) => p.id === inc.id);
-        if (existingIndex === -1) {
-          posts.push(inc);
-        }
+    // POST /api/posts/sync - push locally cached posts that the server doesn't have yet
+    if (req.method === 'POST' && path === '/sync') {
+      const body = await readBody(req);
+      const incoming: any[] = Array.isArray(body.posts) ? body.posts : [];
+      const valid = incoming.filter((p) => p && p.id && p.title && p.category);
+      if (valid.length > 0) {
+        await db.insert(posts).values(valid.map(buildNewRow)).onConflictDoNothing();
       }
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(posts),
-      };
+      return json(await listPosts());
     }
 
     // POST /api/posts/:id/like
     const likeMatch = path.match(/^\/([^/]+)\/like$/);
-    if (event.httpMethod === 'POST' && likeMatch) {
-      const postId = likeMatch[1];
-      const body = JSON.parse(event.body || '{}');
-      const { clientId } = body;
+    if (req.method === 'POST' && likeMatch) {
+      const postId = decodeURIComponent(likeMatch[1]);
+      const { clientId } = await readBody(req);
+      if (!clientId) return json({ error: 'clientId is required' }, 400);
 
-      if (!clientId) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'clientId is required' }),
-        };
-      }
+      const post = await getPost(postId);
+      if (!post) return json({ error: 'Post not found' }, 404);
 
-      let result = { likes: 0, isLiked: false };
-      posts = posts.map((p) => {
-        if (p.id === postId) {
-          const alreadyLiked = (p.likedBy || []).includes(clientId);
-          const newLikedBy = alreadyLiked
-            ? (p.likedBy || []).filter((cid) => cid !== clientId)
-            : [...(p.likedBy || []), clientId];
-          result = { likes: newLikedBy.length, isLiked: !alreadyLiked };
-          return {
-            ...p,
-            likes: newLikedBy.length,
-            likedBy: newLikedBy,
-          };
-        }
-        return p;
-      });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(result),
-      };
+      const likedBy = post.likedBy || [];
+      const alreadyLiked = likedBy.includes(clientId);
+      const newLikedBy = alreadyLiked ? likedBy.filter((c) => c !== clientId) : [...likedBy, clientId];
+      await db
+        .update(posts)
+        .set({ likedBy: newLikedBy, likes: newLikedBy.length })
+        .where(eq(posts.id, postId));
+      return json({ likes: newLikedBy.length, isLiked: !alreadyLiked });
     }
 
     // POST /api/posts/:id/share
     const shareMatch = path.match(/^\/([^/]+)\/share$/);
-    if (event.httpMethod === 'POST' && shareMatch) {
-      const postId = shareMatch[1];
-      let shares = 0;
-
-      posts = posts.map((p) => {
-        if (p.id === postId) {
-          shares = (p.shares || 0) + 1;
-          return { ...p, shares };
-        }
-        return p;
-      });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ shares }),
-      };
+    if (req.method === 'POST' && shareMatch) {
+      const postId = decodeURIComponent(shareMatch[1]);
+      const post = await getPost(postId);
+      if (!post) return json({ error: 'Post not found' }, 404);
+      const shares = (post.shares || 0) + 1;
+      await db.update(posts).set({ shares }).where(eq(posts.id, postId));
+      return json({ shares });
     }
 
     // POST /api/posts/:id/comments
     const commentMatch = path.match(/^\/([^/]+)\/comments$/);
-    if (event.httpMethod === 'POST' && commentMatch) {
-      const postId = commentMatch[1];
-      const body = JSON.parse(event.body || '{}');
-      const { authorName, content, authorAvatar } = body;
-
-      if (!content || !content.trim()) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'Content is required' }),
-        };
+    if (req.method === 'POST' && commentMatch) {
+      const postId = decodeURIComponent(commentMatch[1]);
+      const { authorName, content, authorAvatar } = await readBody(req);
+      if (!content || !String(content).trim()) {
+        return json({ error: 'Content is required' }, 400);
       }
 
-      let createdComment: CommentItem | null = null;
+      const post = await getPost(postId);
+      if (!post) return json({ error: 'Post not found' }, 404);
 
-      posts = posts.map((p) => {
-        if (p.id === postId) {
-          createdComment = {
-            id: 'comment_' + Date.now().toString(),
-            authorName: (authorName && authorName.trim()) || 'Visitor',
-            authorAvatar: authorAvatar || '',
-            content: content.trim(),
-            createdAt: 'Just now',
-            likes: 0,
-            likedBy: [],
-          };
-          return {
-            ...p,
-            comments: [...(p.comments || []), createdComment],
-          };
-        }
-        return p;
-      });
-
-      return {
-        statusCode: 201,
-        headers,
-        body: JSON.stringify(createdComment),
+      const comment: CommentRecord = {
+        id: 'comment_' + Date.now().toString() + Math.random().toString(36).slice(2, 6),
+        authorName: (authorName && String(authorName).trim()) || 'Visitor',
+        authorAvatar: authorAvatar || '',
+        content: String(content).trim(),
+        createdAt: 'Just now',
+        likes: 0,
+        likedBy: [],
       };
+      await db
+        .update(posts)
+        .set({ comments: [...(post.comments || []), comment] })
+        .where(eq(posts.id, postId));
+      return json(comment, 201);
     }
 
     // POST /api/posts/:postId/comments/:commentId/like
     const commentLikeMatch = path.match(/^\/([^/]+)\/comments\/([^/]+)\/like$/);
-    if (event.httpMethod === 'POST' && commentLikeMatch) {
-      const [, postId, commentId] = commentLikeMatch;
-      const body = JSON.parse(event.body || '{}');
-      const { clientId } = body;
+    if (req.method === 'POST' && commentLikeMatch) {
+      const postId = decodeURIComponent(commentLikeMatch[1]);
+      const commentId = decodeURIComponent(commentLikeMatch[2]);
+      const { clientId } = await readBody(req);
+      if (!clientId) return json({ error: 'clientId is required' }, 400);
 
-      if (!clientId) {
-        return {
-          statusCode: 400,
-          headers,
-          body: JSON.stringify({ error: 'clientId is required' }),
-        };
-      }
+      const post = await getPost(postId);
+      if (!post) return json({ error: 'Post not found' }, 404);
 
       let result = { likes: 0, isLiked: false };
-
-      posts = posts.map((p) => {
-        if (p.id === postId) {
-          const updatedComments = (p.comments || []).map((c) => {
-            if (c.id === commentId) {
-              const alreadyLiked = (c.likedBy || []).includes(clientId);
-              const newLikedBy = alreadyLiked
-                ? (c.likedBy || []).filter((cid) => cid !== clientId)
-                : [...(c.likedBy || []), clientId];
-              result = { likes: newLikedBy.length, isLiked: !alreadyLiked };
-              return {
-                ...c,
-                likes: newLikedBy.length,
-                likedBy: newLikedBy,
-              };
-            }
-            return c;
-          });
-          return { ...p, comments: updatedComments };
-        }
-        return p;
+      const updatedComments = (post.comments || []).map((c) => {
+        if (c.id !== commentId) return c;
+        const likedBy = c.likedBy || [];
+        const already = likedBy.includes(clientId);
+        const newLikedBy = already ? likedBy.filter((id) => id !== clientId) : [...likedBy, clientId];
+        result = { likes: newLikedBy.length, isLiked: !already };
+        return { ...c, likes: newLikedBy.length, likedBy: newLikedBy };
       });
-
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify(result),
-      };
-    }
-
-    // DELETE /api/posts/:id
-    const deleteMatch = path.match(/^\/([^/]+)$/);
-    if (event.httpMethod === 'DELETE' && deleteMatch) {
-      const postId = deleteMatch[1];
-      posts = posts.filter((p) => p.id !== postId);
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ success: true }),
-      };
+      await db.update(posts).set({ comments: updatedComments }).where(eq(posts.id, postId));
+      return json(result);
     }
 
     // DELETE /api/posts/:postId/comments/:commentId
     const deleteCommentMatch = path.match(/^\/([^/]+)\/comments\/([^/]+)$/);
-    if (event.httpMethod === 'DELETE' && deleteCommentMatch) {
-      const [, postId, commentId] = deleteCommentMatch;
-      posts = posts.map((p) => {
-        if (p.id === postId) {
-          return {
-            ...p,
-            comments: (p.comments || []).filter((c) => c.id !== commentId),
-          };
-        }
-        return p;
-      });
-      return {
-        statusCode: 200,
-        headers,
-        body: JSON.stringify({ success: true }),
-      };
+    if (req.method === 'DELETE' && deleteCommentMatch) {
+      const postId = decodeURIComponent(deleteCommentMatch[1]);
+      const commentId = decodeURIComponent(deleteCommentMatch[2]);
+      const post = await getPost(postId);
+      if (post) {
+        await db
+          .update(posts)
+          .set({ comments: (post.comments || []).filter((c) => c.id !== commentId) })
+          .where(eq(posts.id, postId));
+      }
+      return json({ success: true });
     }
 
-    return {
-      statusCode: 404,
-      headers,
-      body: JSON.stringify({ error: 'Not found' }),
-    };
+    // DELETE /api/posts/:id
+    const deleteMatch = path.match(/^\/([^/]+)$/);
+    if (req.method === 'DELETE' && deleteMatch) {
+      await db.delete(posts).where(eq(posts.id, decodeURIComponent(deleteMatch[1])));
+      return json({ success: true });
+    }
+
+    return json({ error: 'Not found' }, 404);
   } catch (error) {
-    console.error('Function error:', error);
-    return {
-      statusCode: 500,
-      headers,
-      body: JSON.stringify({ error: 'Internal server error' }),
-    };
+    console.error('posts function error:', error);
+    return json({ error: 'Internal server error' }, 500);
   }
+};
+
+export const config: Config = {
+  path: ['/api/posts', '/api/posts/*'],
 };
