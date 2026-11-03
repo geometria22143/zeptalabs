@@ -167,15 +167,25 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
 
     // POST /api/posts/sync - Batch sync
     if (event.httpMethod === 'POST' && path === '/sync') {
+      let posts = await readPosts();
       const body = JSON.parse(event.body || '{}');
       const incomingPosts = body.posts || [];
       
+      let addedCount = 0;
       for (const inc of incomingPosts) {
         if (!inc || !inc.id || !inc.title) continue;
         const existingIndex = posts.findIndex((p) => p.id === inc.id);
         if (existingIndex === -1) {
           posts.push(inc);
+          addedCount++;
         }
+      }
+
+      if (addedCount > 0) {
+        await writePosts(posts);
+        console.log(`✅ Batch sync complete - ${addedCount} posts added, ${posts.length} total in storage`);
+      } else {
+        console.log(`✅ Batch sync complete - No new posts to sync, ${posts.length} total in storage`);
       }
 
       return {
@@ -188,6 +198,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // POST /api/posts/:id/like
     const likeMatch = path.match(/^\/([^/]+)\/like$/);
     if (event.httpMethod === 'POST' && likeMatch) {
+      let posts = await readPosts();
       const postId = likeMatch[1];
       const body = JSON.parse(event.body || '{}');
       const { clientId } = body;
@@ -217,6 +228,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
         return p;
       });
 
+      await writePosts(posts);
+
       return {
         statusCode: 200,
         headers,
@@ -227,6 +240,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // POST /api/posts/:id/share
     const shareMatch = path.match(/^\/([^/]+)\/share$/);
     if (event.httpMethod === 'POST' && shareMatch) {
+      let posts = await readPosts();
       const postId = shareMatch[1];
       let shares = 0;
 
@@ -238,6 +252,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
         return p;
       });
 
+      await writePosts(posts);
+
       return {
         statusCode: 200,
         headers,
@@ -248,6 +264,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // POST /api/posts/:id/comments
     const commentMatch = path.match(/^\/([^/]+)\/comments$/);
     if (event.httpMethod === 'POST' && commentMatch) {
+      let posts = await readPosts();
       const postId = commentMatch[1];
       const body = JSON.parse(event.body || '{}');
       const { authorName, content, authorAvatar } = body;
@@ -281,6 +298,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
         return p;
       });
 
+      await writePosts(posts);
+
       return {
         statusCode: 201,
         headers,
@@ -291,6 +310,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // POST /api/posts/:postId/comments/:commentId/like
     const commentLikeMatch = path.match(/^\/([^/]+)\/comments\/([^/]+)\/like$/);
     if (event.httpMethod === 'POST' && commentLikeMatch) {
+      let posts = await readPosts();
       const [, postId, commentId] = commentLikeMatch;
       const body = JSON.parse(event.body || '{}');
       const { clientId } = body;
@@ -327,6 +347,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
         return p;
       });
 
+      await writePosts(posts);
+
       return {
         statusCode: 200,
         headers,
@@ -337,8 +359,11 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // DELETE /api/posts/:id
     const deleteMatch = path.match(/^\/([^/]+)$/);
     if (event.httpMethod === 'DELETE' && deleteMatch) {
+      let posts = await readPosts();
       const postId = deleteMatch[1];
       posts = posts.filter((p) => p.id !== postId);
+      await writePosts(posts);
+      console.log('✅ Post deleted from blob storage, postId:', postId);
       return {
         statusCode: 200,
         headers,
@@ -349,6 +374,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
     // DELETE /api/posts/:postId/comments/:commentId
     const deleteCommentMatch = path.match(/^\/([^/]+)\/comments\/([^/]+)$/);
     if (event.httpMethod === 'DELETE' && deleteCommentMatch) {
+      let posts = await readPosts();
       const [, postId, commentId] = deleteCommentMatch;
       posts = posts.map((p) => {
         if (p.id === postId) {
@@ -359,6 +385,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
         }
         return p;
       });
+      await writePosts(posts);
+      console.log('✅ Comment deleted from blob storage, commentId:', commentId);
       return {
         statusCode: 200,
         headers,

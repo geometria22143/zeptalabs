@@ -1,4 +1,5 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
+import { getStore } from '@netlify/blobs';
 
 interface ServerUserItem {
   name: string;
@@ -9,7 +10,29 @@ interface ServerUserItem {
   notificationsEnabled?: boolean;
 }
 
-let users: ServerUserItem[] = [];
+// Netlify Blobs storage helpers
+async function readUsers(): Promise<ServerUserItem[]> {
+  try {
+    const store = getStore('zeptalabs-data');
+    const data = await store.get('users', { type: 'json' });
+    console.log('📖 Read from blob storage:', data ? (data as ServerUserItem[]).length : 0, 'users');
+    return (data as ServerUserItem[]) || [];
+  } catch (error) {
+    console.error('❌ Error reading users from blob storage:', error);
+    return [];
+  }
+}
+
+async function writeUsers(users: ServerUserItem[]): Promise<void> {
+  try {
+    const store = getStore('zeptalabs-data');
+    await store.set('users', JSON.stringify(users));
+    console.log('💾 Wrote to blob storage:', users.length, 'users');
+  } catch (error) {
+    console.error('❌ Error writing users to blob storage:', error);
+    throw new Error('Failed to save users to storage');
+  }
+}
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -28,6 +51,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   try {
     // GET /api/users
     if (event.httpMethod === 'GET' && path === '') {
+      const users = await readUsers();
       return {
         statusCode: 200,
         headers,
@@ -37,6 +61,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
     // POST /api/users
     if (event.httpMethod === 'POST' && path === '') {
+      let users = await readUsers();
       const { name, accountKey, email, avatarUrl, notificationsEnabled } = JSON.parse(event.body || '{}');
       
       if (!accountKey || typeof accountKey !== 'string') {
@@ -60,6 +85,8 @@ export const handler: Handler = async (event: HandlerEvent) => {
       };
       
       users.push(updatedUser);
+      await writeUsers(users);
+      console.log('✅ User saved to blob storage:', updatedUser.accountKey);
       
       return {
         statusCode: 200,
@@ -70,6 +97,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
 
     // POST /api/users/find
     if (event.httpMethod === 'POST' && path === '/find') {
+      const users = await readUsers();
       const { key } = JSON.parse(event.body || '{}');
       
       if (!key || typeof key !== 'string') {

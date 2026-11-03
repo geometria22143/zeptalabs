@@ -1,6 +1,29 @@
 import type { Handler, HandlerEvent } from '@netlify/functions';
+import { getStore } from '@netlify/blobs';
 
-let storedLogo = 'logo.png';
+// Netlify Blobs storage helpers
+async function readLogo(): Promise<string> {
+  try {
+    const store = getStore('zeptalabs-data');
+    const data = await store.get('logo', { type: 'text' });
+    console.log('📖 Read logo from blob storage:', data || 'logo.png (default)');
+    return (data as string) || 'logo.png';
+  } catch (error) {
+    console.error('❌ Error reading logo from blob storage:', error);
+    return 'logo.png';
+  }
+}
+
+async function writeLogo(logoUrl: string): Promise<void> {
+  try {
+    const store = getStore('zeptalabs-data');
+    await store.set('logo', logoUrl);
+    console.log('💾 Wrote logo to blob storage:', logoUrl);
+  } catch (error) {
+    console.error('❌ Error writing logo to blob storage:', error);
+    throw new Error('Failed to save logo to storage');
+  }
+}
 
 const headers = {
   'Access-Control-Allow-Origin': '*',
@@ -17,6 +40,7 @@ export const handler: Handler = async (event: HandlerEvent) => {
   try {
     // GET /api/logo
     if (event.httpMethod === 'GET') {
+      const storedLogo = await readLogo();
       return {
         statusCode: 200,
         headers,
@@ -36,12 +60,12 @@ export const handler: Handler = async (event: HandlerEvent) => {
         };
       }
 
-      storedLogo = logoUrl;
+      await writeLogo(logoUrl);
       
       return {
         statusCode: 200,
         headers,
-        body: JSON.stringify({ logoUrl: storedLogo }),
+        body: JSON.stringify({ logoUrl }),
       };
     }
 
