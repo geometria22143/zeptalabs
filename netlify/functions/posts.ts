@@ -1,4 +1,5 @@
 import type { Handler, HandlerEvent, HandlerContext } from '@netlify/functions';
+import { getStore } from '@netlify/blobs';
 
 interface CommentItem {
   id: string;
@@ -30,8 +31,29 @@ interface PostItem {
   comments: CommentItem[];
 }
 
-// Use Netlify Blobs for persistent storage
-let posts: PostItem[] = [];
+// Netlify Blobs storage helpers
+async function readPosts(): Promise<PostItem[]> {
+  try {
+    const store = getStore('zeptalabs-data');
+    const data = await store.get('posts', { type: 'json' });
+    console.log('📖 Read from blob storage:', data ? (data as PostItem[]).length : 0, 'posts');
+    return (data as PostItem[]) || [];
+  } catch (error) {
+    console.error('❌ Error reading posts from blob storage:', error);
+    return [];
+  }
+}
+
+async function writePosts(posts: PostItem[]): Promise<void> {
+  try {
+    const store = getStore('zeptalabs-data');
+    await store.set('posts', JSON.stringify(posts));
+    console.log('💾 Wrote to blob storage:', posts.length, 'posts');
+  } catch (error) {
+    console.error('❌ Error writing posts to blob storage:', error);
+    throw new Error('Failed to save posts to storage');
+  }
+}
 
 // CORS headers for all responses
 const headers = {
@@ -55,7 +77,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
   try {
     // GET /api/posts - Fetch all posts
     if (event.httpMethod === 'GET' && path === '') {
-      console.log('✅ GET /api/posts - Returning', posts.length, 'posts');
+      const posts = await readPosts();
+      console.log('✅ GET /api/posts - Returning', posts.length, 'posts from blob storage');
       return {
         statusCode: 200,
         headers,
@@ -65,6 +88,7 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
 
     // POST /api/posts - Create new post
     if (event.httpMethod === 'POST' && path === '') {
+      let posts = await readPosts();
       const body = JSON.parse(event.body || '{}');
       console.log('📝 POST /api/posts - Creating post:', body.title);
       
@@ -94,6 +118,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
             likes: Math.max(existing.likes || 0, body.likes || 0),
             shares: Math.max(existing.shares || 0, body.shares || 0),
           };
+          await writePosts(posts);
+          console.log('✅ Post updated in blob storage! Total posts:', posts.length);
           return {
             statusCode: 200,
             headers,
@@ -129,7 +155,8 @@ export const handler: Handler = async (event: HandlerEvent, context: HandlerCont
       };
 
       posts.unshift(newPost);
-      console.log('✅ Post created! Total posts:', posts.length);
+      await writePosts(posts);
+      console.log('✅ Post saved to blob storage! Total posts:', posts.length);
       
       return {
         statusCode: 201,
