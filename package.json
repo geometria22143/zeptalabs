@@ -12,6 +12,7 @@
     "lint": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "dependencies": {
+    "@netlify/blobs": "^8.1.0",
     "@netlify/functions": "^2.8.2",
     "@emailjs/browser": "^5.0.3",
     "@google/genai": "^2.4.0",
